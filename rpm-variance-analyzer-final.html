@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPM Variance Analyzer</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['"Space Grotesk"', 'sans-serif'],
+          sans: ['Inter', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'monospace'],
+        },
+        colors: {
+          ink: { 950:'#070914', 900:'#0c0f1e', 800:'#12162a', 700:'#1a1f38' },
+          violet: { 400:'#a78bfa', 500:'#8b5cf6', 600:'#7c3aed' },
+          cyan: { 300:'#67e8f9', 400:'#22d3ee', 500:'#06b6d4' },
+        },
+        boxShadow: {
+          glow: '0 0 0 1px rgba(139,92,246,.15), 0 12px 40px -12px rgba(139,92,246,.35)',
+        }
+      }
+    }
+  }
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+
+<style>
+  body{ font-family:'Inter', sans-serif; background:#070914; }
+  .font-display{ font-family:'Space Grotesk', sans-serif; }
+  .font-mono{ font-family:'IBM Plex Mono', monospace; }
+
+  .glass{
+    background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+    border: 1px solid rgba(255,255,255,.08);
+    backdrop-filter: blur(18px);
+  }
+  .blob{ position:absolute; border-radius:50%; filter: blur(80px); opacity:.35; pointer-events:none; }
+  @keyframes float{ 0%,100%{ transform: translate(0,0) scale(1);} 50%{ transform: translate(20px,-30px) scale(1.06);} }
+  .blob-anim{ animation: float 14s ease-in-out infinite; }
+
+  ::-webkit-scrollbar{ height:8px; width:8px; }
+  ::-webkit-scrollbar-thumb{ background:#2c2f4a; border-radius:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+
+  input[type=text], input[type=number], input[type=datetime-local], select{
+    background:#0c0f1e; border:1px solid #232847; color:#e7e7f5;
+    border-radius:10px; padding:9px 12px; font-size:13.5px; width:100%;
+    font-family:'IBM Plex Mono', monospace;
+  }
+  input:focus, select:focus{ outline:none; border-color:#8b5cf6; box-shadow:0 0 0 3px rgba(139,92,246,.18); }
+
+  .tab-btn{ transition:.18s ease; }
+  .tab-btn.active{ background:linear-gradient(135deg,#8b5cf6,#06b6d4); color:#070914; }
+  .tab-btn:not(.active){ color:#a3a6c2; }
+
+  .drop-zone{ border:1.5px dashed #2e3258; transition:.15s ease; }
+  .drop-zone.drag{ border-color:#8b5cf6; background:rgba(139,92,246,.06); }
+
+  table.data-table thead th{
+    background:#0c0f1e; color:#8b8fb3; text-transform:uppercase; font-size:10.5px;
+    letter-spacing:.06em; padding:10px 12px; border-bottom:1px solid #232847; white-space:nowrap; text-align:left;
+  }
+  table.data-table tbody td{ padding:8px 10px; border-bottom:1px solid #181c33; font-size:13px; white-space:nowrap; }
+  table.data-table tbody tr:hover{ background:rgba(255,255,255,.025); }
+
+  .chip{ font-size:11px; padding:3px 10px; border-radius:999px; font-weight:600; }
+  .chip-bad{ background:rgba(248,113,113,.12); color:#fca5a5; }
+  .chip-warn{ background:rgba(251,191,36,.12); color:#fcd34d; }
+  .chip-good{ background:rgba(52,211,153,.12); color:#6ee7b7; }
+
+  .row-del{ width:26px; height:26px; border-radius:7px; border:1px solid #232847; color:#8b8fb3; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .row-del:hover{ border-color:#f87171; color:#f87171; }
+</style>
+</head>
+<body class="text-slate-200 min-h-screen relative overflow-x-hidden">
+
+<div class="blob blob-anim w-[480px] h-[480px] bg-violet-600 -top-40 -left-32"></div>
+<div class="blob blob-anim w-[420px] h-[420px] bg-cyan-500 top-1/3 -right-32" style="animation-delay:-6s"></div>
+<div class="blob blob-anim w-[360px] h-[360px] bg-fuchsia-600 bottom-0 left-1/4" style="animation-delay:-3s"></div>
+
+<div class="relative z-10 max-w-7xl mx-auto px-5 sm:px-8 py-10">
+
+  <!-- HERO -->
+  <header class="flex flex-col gap-4 mb-10">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center shadow-glow">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 17L9 11L13 15L21 7" stroke="#070914" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 7H21V13" stroke="#070914" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <span class="font-display font-semibold text-sm tracking-wide text-slate-300">RPM Variance Analyzer</span>
+      <span class="chip chip-warn ml-1">Beta</span>
+    </div>
+    <h1 class="font-display font-bold text-3xl sm:text-4xl text-white leading-tight max-w-2xl">
+      Turn a noon-report log into a defensible <span class="bg-gradient-to-r from-violet-400 to-cyan-300 bg-clip-text text-transparent">RPM performance read</span>.
+    </h1>
+    <p class="text-slate-400 text-sm max-w-xl">Upload a CSV/Excel engine log or key it in manually. Set the propeller pitch and warranted speed once — or override them per voyage leg — and get daily &amp; average RPM variance instantly.</p>
+  </header>
+
+  <!-- GLOBAL PARAMS -->
+  <section class="glass rounded-2xl p-6 mb-6 shadow-glow">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-display font-semibold text-lg text-white">Voyage parameters</h2>
+      <span class="text-[11px] text-slate-500 font-mono">used unless a row overrides them</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">Propeller pitch (m)</label>
+        <input type="number" id="gPitch" step="0.001" value="6.030">
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">Warranted speed (kn)</label>
+        <input type="number" id="gWarrSpeed" step="0.01" value="11.00">
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">Underperformance threshold (variance ≥ %)</label>
+        <input type="number" id="gThreshold" step="0.1" value="3.0">
+      </div>
+    </div>
+  </section>
+
+  <!-- DATA INPUT -->
+  <section class="glass rounded-2xl p-6 mb-6">
+    <div class="flex flex-wrap items-center gap-2 mb-5">
+      <button class="tab-btn active px-4 py-2 rounded-lg text-sm font-semibold" data-tab="upload">⇪ Upload file</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold" data-tab="manual">⌨ Manual entry</button>
+    </div>
+
+    <!-- UPLOAD TAB -->
+    <div id="tab-upload">
+      <div id="dropZone" class="drop-zone rounded-xl p-10 text-center cursor-pointer">
+        <p class="font-display text-white font-medium mb-1">Drop your CSV or Excel log here</p>
+        <p class="text-xs text-slate-500 mb-4">Columns: datetime, steaming hours, speed over ground, reported RPM — any header names, any order. Optional per-row pitch / warranted speed columns.</p>
+        <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-400 text-ink-950 text-sm font-semibold" id="browseBtn">Browse files</button>
+        <button class="px-4 py-2 rounded-lg border border-[#232847] text-slate-300 text-sm ml-2" id="downloadSample">⇩ Download sample template</button>
+        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" class="hidden">
+      </div>
+      <div id="mappingPanel" class="hidden mt-6">
+        <h3 class="font-display text-white font-medium mb-3 text-sm">Confirm column mapping</h3>
+        <div id="mappingGrid" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5"></div>
+        <button id="runUpload" class="px-5 py-2.5 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-400 text-ink-950 text-sm font-semibold">Run analysis →</button>
+      </div>
+    </div>
+
+    <!-- MANUAL TAB -->
+    <div id="tab-manual" class="hidden">
+      <div class="overflow-x-auto rounded-xl border border-[#232847]">
+        <table class="data-table w-full min-w-[820px]" id="manualTable">
+          <thead><tr>
+            <th>Date / time</th><th>Steaming hrs</th><th>SOG (kn)</th><th>Reported RPM</th>
+            <th>Pitch override</th><th>Warr. speed override</th><th></th>
+          </tr></thead>
+          <tbody id="manualBody"></tbody>
+        </table>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button id="addManualRow" class="px-4 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-400 text-ink-950 text-sm font-semibold">+ Add row</button>
+        <button id="loadSampleManual" class="px-4 py-2 rounded-lg border border-[#232847] text-slate-300 text-sm">Load sample</button>
+        <button id="runManual" class="px-4 py-2 rounded-lg border border-cyan-400 text-cyan-300 text-sm ml-auto">Run analysis →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="resultsSection" class="hidden">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div class="glass rounded-xl p-5">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">Avg RPM variance</div>
+        <div id="kpiAvgVariance" class="font-display text-2xl font-bold mt-1 text-white">—</div>
+      </div>
+      <div class="glass rounded-xl p-5">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">Avg slip</div>
+        <div id="kpiAvgSlip" class="font-display text-2xl font-bold mt-1 text-white">—</div>
+      </div>
+      <div class="glass rounded-xl p-5">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">Entries analysed</div>
+        <div id="kpiEntries" class="font-display text-2xl font-bold mt-1 text-white">—</div>
+      </div>
+      <div class="glass rounded-xl p-5">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">Days underperforming</div>
+        <div id="kpiBadDays" class="font-display text-2xl font-bold mt-1 text-white">—</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="glass rounded-2xl p-6">
+        <h3 class="font-display font-semibold text-white mb-3 text-sm">RPM variance over time</h3>
+        <canvas id="varianceChart" height="200"></canvas>
+      </div>
+      <div class="glass rounded-2xl p-6">
+        <h3 class="font-display font-semibold text-white mb-3 text-sm">Reported vs required RPM</h3>
+        <canvas id="rpmChart" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="glass rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 class="font-display font-semibold text-white text-sm">Daily breakdown</h3>
+        <div class="flex gap-3 text-[11px] text-slate-500">
+          <span class="flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></i>within tolerance</span>
+          <span class="flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-amber-400 inline-block"></i>marginal</span>
+          <span class="flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-red-400 inline-block"></i>underperforming</span>
+        </div>
+      </div>
+      <div class="overflow-x-auto rounded-xl border border-[#232847]">
+        <table class="data-table w-full min-w-[920px]">
+          <thead><tr>
+            <th>Date / time</th><th>Hours</th><th>SOG</th><th>Reported RPM</th><th>Engine dist.</th>
+            <th>Slip</th><th>Required RPM</th><th>Variance</th><th>Status</th>
+          </tr></thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer class="mt-10 text-[11.5px] text-slate-500 border-t border-[#1a1f38] pt-6">
+    <b class="text-violet-300">Method note —</b> Required RPM is derived as: Engine Warranted Speed = Warranted Speed ÷ (1 − Slip), then Required RPM = Engine Warranted Speed × 1,852 ÷ (Pitch × 60). Variance = (Required RPM − Reported RPM) ÷ Required RPM — positive means the vessel ran below the RPM needed for the warranted speed at that day's slip. The RPM method was rejected as a standalone basis for proving underperformance in <i>The Divinegate</i>; treat results here as one analytical input alongside independently verified weather and slip benchmarks, not a self-sufficient claim.
+  </footer>
+</div>
+
+<script>
+$(function(){
+  const NM = 1852;
+  let lastRows = []; // raw parsed rows from upload, before mapping applied
+  let lastHeaders = [];
+
+  /* ---------------- Tabs ---------------- */
+  $('.tab-btn').on('click', function(){
+    $('.tab-btn').removeClass('active');
+    $(this).addClass('active');
+    const tab = $(this).data('tab');
+    $('#tab-upload, #tab-manual').addClass('hidden');
+    $('#tab-'+tab).removeClass('hidden');
+  });
+
+  /* ---------------- Manual entry ---------------- */
+  function manualRow(d){
+    d = d||{};
+    const tr = $(`<tr>
+      <td><input type="datetime-local" class="m-dt" value="${d.dt||''}"></td>
+      <td><input type="number" class="m-hours" step="0.1" value="${d.hours!=null?d.hours:24}"></td>
+      <td><input type="number" class="m-sog" step="0.01" value="${d.sog!=null?d.sog:''}"></td>
+      <td><input type="number" class="m-rpm" step="0.01" value="${d.rpm!=null?d.rpm:''}"></td>
+      <td><input type="number" class="m-pitch" step="0.001" placeholder="global" value="${d.pitch!=null?d.pitch:''}"></td>
+      <td><input type="number" class="m-warr" step="0.01" placeholder="global" value="${d.warr!=null?d.warr:''}"></td>
+      <td><div class="row-del">×</div></td>
+    </tr>`);
+    tr.find('.row-del').on('click', ()=>{ tr.remove(); });
+    return tr;
+  }
+  $('#addManualRow').on('click', ()=> $('#manualBody').append(manualRow()));
+  $('#loadSampleManual').on('click', function(){
+    $('#manualBody').empty();
+    const sample = [
+      {dt:'2026-03-01T12:00', hours:24, sog:11.7, rpm:73.2},
+      {dt:'2026-03-02T12:00', hours:24, sog:12.0, rpm:72.8},
+      {dt:'2026-03-03T12:00', hours:24, sog:11.5, rpm:70.5},
+      {dt:'2026-03-04T12:00', hours:24, sog:11.4, rpm:69.9},
+      {dt:'2026-03-05T12:00', hours:13.5, sog:12.2, rpm:71.8},
+    ];
+    sample.forEach(d=> $('#manualBody').append(manualRow(d)));
+  });
+  $('#loadSampleManual').trigger('click');
+
+  $('#runManual').on('click', function(){
+    const rows = [];
+    $('#manualBody tr').each(function(){
+      const dt = $(this).find('.m-dt').val();
+      const hours = parseFloat($(this).find('.m-hours').val());
+      const sog = parseFloat($(this).find('.m-sog').val());
+      const rpm = parseFloat($(this).find('.m-rpm').val());
+      const pitchOv = parseFloat($(this).find('.m-pitch').val());
+      const warrOv = parseFloat($(this).find('.m-warr').val());
+      if(!isFinite(hours) || !isFinite(sog) || !isFinite(rpm)) return;
+      rows.push({
+        dt, hours, sog, rpm,
+        pitch: isFinite(pitchOv)?pitchOv:null,
+        warr: isFinite(warrOv)?warrOv:null
+      });
+    });
+    runAnalysis(rows);
+  });
+
+  /* ---------------- File upload ---------------- */
+  $('#downloadSample').on('click', function(e){
+    e.stopPropagation();
+    const headers = ['Date','Steaming Hours','Speed Over Ground (kn)','Reported RPM','Propeller Pitch (optional)','Warranted Speed (optional)'];
+    const rows = [
+      ['2026-03-01 12:00', 24, 11.7, 73.2, '', ''],
+      ['2026-03-02 12:00', 24, 12.0, 72.8, '', ''],
+      ['2026-03-03 12:00', 24, 11.5, 70.5, '', ''],
+      ['2026-03-04 12:00', 24, 11.4, 69.9, '', ''],
+      ['2026-03-05 12:00', 13.5, 12.2, 71.8, '', ''],
+    ];
+    const csv = [headers.join(',')].concat(rows.map(r=> r.join(','))).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'rpm-log-sample-template.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  $('#browseBtn').on('click', function(e){ e.stopPropagation(); $('#fileInput').trigger('click'); });
+  $('#dropZone').on('click', function(e){
+    if(e.target.closest('button') || e.target.tagName==='INPUT') return;
+    $('#fileInput').trigger('click');
+  });
+  $('#dropZone').on('dragover', e=>{ e.preventDefault(); $('#dropZone').addClass('drag'); });
+  $('#dropZone').on('dragleave', e=>{ $('#dropZone').removeClass('drag'); });
+  $('#dropZone').on('drop', e=>{
+    e.preventDefault(); $('#dropZone').removeClass('drag');
+    const f = e.originalEvent.dataTransfer.files[0];
+    if(f) handleFile(f);
+  });
+  $('#fileInput').on('change', function(){
+    if(this.files[0]) handleFile(this.files[0]);
+  });
+
+  function handleFile(file){
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array', cellDates:true});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw:true, defval:''});
+      // find header row: first non-empty row
+      let headerIdx = 0;
+      while(headerIdx < json.length && json[headerIdx].every(c=>c==='')) headerIdx++;
+      lastHeaders = json[headerIdx].map(h=>String(h).trim());
+      lastRows = json.slice(headerIdx+1).filter(r=> r.some(c=>c!==''));
+      buildMappingPanel(lastHeaders);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  const FIELD_DEFS = [
+    {key:'dt',   label:'Date / time',        aliases:['date','datetime','date/time','reported date','log date','time','noon']},
+    {key:'hours',label:'Steaming hours',     aliases:['steaming hours','hours','period','steaming hrs','hrs']},
+    {key:'sog',  label:'Speed over ground',  aliases:['speed over ground','sog','speed','obs speed','observed speed','distance speed']},
+    {key:'rpm',  label:'Reported RPM',       aliases:['reported rpm','rpm','engine rpm','revolutions']},
+    {key:'pitch',label:'Propeller pitch (optional)', aliases:['propeller pitch','pitch'], optional:true},
+    {key:'warr', label:'Warranted speed (optional)', aliases:['warranted speed','warranty speed','warr speed'], optional:true},
+  ];
+
+  function guessColumn(alias_list, headers){
+    const norm = s=> String(s).toLowerCase().replace(/[^a-z0-9]/g,'');
+    const normHeaders = headers.map(norm);
+    for(const a of alias_list){
+      const na = norm(a);
+      const idx = normHeaders.findIndex(h=> h===na || h.includes(na) || na.includes(h));
+      if(idx>-1) return idx;
+    }
+    return -1;
+  }
+
+  function buildMappingPanel(headers){
+    const grid = $('#mappingGrid').empty();
+    FIELD_DEFS.forEach(f=>{
+      const guess = guessColumn(f.aliases, headers);
+      const opts = ['<option value="-1">— none —</option>']
+        .concat(headers.map((h,i)=> `<option value="${i}" ${i===guess?'selected':''}>${h || '(col '+(i+1)+')'}</option>`));
+      grid.append(`
+        <div>
+          <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">${f.label}${f.optional?'':' *'}</label>
+          <select class="map-select" data-key="${f.key}">${opts.join('')}</select>
+        </div>
+      `);
+    });
+    $('#mappingPanel').removeClass('hidden');
+  }
+
+  function parseDateFlexible(val){
+    if(val instanceof Date) return val;
+    if(typeof val === 'number'){
+      const utc_days = Math.floor(val - 25569);
+      const utc_value = utc_days*86400;
+      return new Date(utc_value*1000);
+    }
+    const s = String(val).trim();
+    let d = new Date(s);
+    if(!isNaN(d)) return d;
+    const m = s.match(/(\d{1,4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,4})/);
+    if(m){
+      let [_, a,b,c] = m;
+      let day,month,year;
+      if(a.length===4){ year=+a; month=+b; day=+c; }
+      else if(c.length===4){ if(+a>12){ day=+a; month=+b; } else { day=+a; month=+b; } year=+c; }
+      d = new Date(year, month-1, day);
+      if(!isNaN(d)) return d;
+    }
+    return null;
+  }
+
+  $('#runUpload').on('click', function(){
+    const mapping = {};
+    $('.map-select').each(function(){
+      mapping[$(this).data('key')] = parseInt($(this).val());
+    });
+    if(mapping.hours<0 || mapping.sog<0 || mapping.rpm<0){
+      alert('Please map Steaming hours, Speed over ground and Reported RPM at minimum.');
+      return;
+    }
+    const rows = lastRows.map(r=>{
+      const get = (key)=> mapping[key]>=0 ? r[mapping[key]] : null;
+      const hours = parseFloat(get('hours'));
+      const sog = parseFloat(get('sog'));
+      const rpm = parseFloat(get('rpm'));
+      const pitchOv = parseFloat(get('pitch'));
+      const warrOv = parseFloat(get('warr'));
+      const dtRaw = get('dt');
+      const dtParsed = dtRaw!=null ? parseDateFlexible(dtRaw) : null;
+      return {
+        dt: dtParsed ? dtParsed.toISOString() : (dtRaw||''),
+        hours, sog, rpm,
+        pitch: isFinite(pitchOv)?pitchOv:null,
+        warr: isFinite(warrOv)?warrOv:null
+      };
+    }).filter(r=> isFinite(r.hours) && isFinite(r.sog) && isFinite(r.rpm));
+    runAnalysis(rows);
+  });
+
+  /* ---------------- Core calculation ---------------- */
+  let chartVariance, chartRpm;
+
+  function fmt(n,d){ return isFinite(n) ? n.toFixed(d==null?2:d) : '—'; }
+  function fmtDt(v){
+    if(!v) return '—';
+    const d = new Date(v);
+    if(isNaN(d)) return String(v);
+    return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  }
+  function statusOf(v, thr){
+    if(!isFinite(v)) return {cls:'chip-good', label:'n/a'};
+    if(v >= thr) return {cls:'chip-bad', label:'underperforming'};
+    if(v >= 0) return {cls:'chip-warn', label:'marginal'};
+    return {cls:'chip-good', label:'within tolerance'};
+  }
+  function dotColor(v, thr){
+    if(!isFinite(v)) return '#67e8f9';
+    if(v>=thr) return '#f87171';
+    if(v>=0) return '#fbbf24';
+    return '#34d399';
+  }
+
+  function runAnalysis(rows){
+    const gPitch = parseFloat($('#gPitch').val());
+    const gWarr = parseFloat($('#gWarrSpeed').val());
+    const thr = parseFloat($('#gThreshold').val()) || 0;
+
+    const computed = rows.map(r=>{
+      const pitch = r.pitch!=null ? r.pitch : gPitch;
+      const warr = r.warr!=null ? r.warr : gWarr;
+      const engineDist = pitch * r.rpm * 60 * r.hours / NM;
+      const actualDist = r.sog * r.hours;
+      const slip = engineDist>0 ? (engineDist - actualDist)/engineDist : NaN;
+      const engineWarrSpeed = (slip<1) ? warr/(1-slip) : NaN;
+      const reqRpm = engineWarrSpeed * NM / (pitch*60);
+      const variance = reqRpm ? ((reqRpm - r.rpm)/reqRpm)*100 : NaN;
+      return {...r, pitch, warr, engineDist, slip, reqRpm, variance};
+    });
+
+    renderKPIs(computed, thr);
+    renderTable(computed, thr);
+    renderCharts(computed, thr);
+    $('#resultsSection').removeClass('hidden');
+    $('html, body').animate({}, 0);
+    document.getElementById('resultsSection').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+
+  function renderKPIs(rows, thr){
+    const totalHours = rows.reduce((s,r)=>s+r.hours,0);
+    const avgVar = totalHours ? rows.reduce((s,r)=> s + (isFinite(r.variance)? r.variance*r.hours:0),0)/totalHours : NaN;
+    const avgSlip = totalHours ? rows.reduce((s,r)=> s + (isFinite(r.slip)? r.slip*r.hours:0),0)/totalHours : NaN;
+    const badDays = rows.filter(r=> r.variance>=thr).length;
+
+    $('#kpiAvgVariance').html((avgVar>=0?'+':'')+fmt(avgVar,1)+'<span class="text-sm text-slate-500">%</span>')
+      .removeClass('text-white text-red-300 text-emerald-300')
+      .addClass(avgVar>=thr?'text-red-300':(avgVar>=0?'text-amber-300':'text-emerald-300'));
+    $('#kpiAvgSlip').html(fmt(avgSlip*100,1)+'<span class="text-sm text-slate-500">%</span>');
+    $('#kpiEntries').text(rows.length);
+    $('#kpiBadDays').text(badDays);
+  }
+
+  function renderTable(rows, thr){
+    const body = $('#resultsBody').empty();
+    rows.forEach(r=>{
+      const st = statusOf(r.variance, thr);
+      body.append(`<tr>
+        <td class="font-mono text-slate-400">${fmtDt(r.dt)}</td>
+        <td class="font-mono">${fmt(r.hours,1)}</td>
+        <td class="font-mono">${fmt(r.sog,2)}</td>
+        <td class="font-mono">${fmt(r.rpm,1)}</td>
+        <td class="font-mono text-slate-400">${fmt(r.engineDist,1)}</td>
+        <td class="font-mono text-slate-400">${fmt(r.slip*100,1)}%</td>
+        <td class="font-mono text-slate-400">${fmt(r.reqRpm,1)}</td>
+        <td class="font-mono font-semibold ${r.variance>=thr?'text-red-400':(r.variance>=0?'text-amber-400':'text-emerald-400')}">${r.variance>=0?'+':''}${fmt(r.variance,1)}%</td>
+        <td><span class="chip ${st.cls}">${st.label}</span></td>
+      </tr>`);
+    });
+  }
+
+  function renderCharts(rows, thr){
+    const labels = rows.map(r=> fmtDt(r.dt));
+    const variances = rows.map(r=> isFinite(r.variance)? +r.variance.toFixed(2) : null);
+    const colors = rows.map(r=> dotColor(r.variance, thr));
+    const reqRpms = rows.map(r=> isFinite(r.reqRpm)? +r.reqRpm.toFixed(1) : null);
+    const repRpms = rows.map(r=> +r.rpm.toFixed(1));
+
+    if(chartVariance) chartVariance.destroy();
+    if(chartRpm) chartRpm.destroy();
+
+    const gridColor = 'rgba(255,255,255,.06)';
+    const tickColor = '#7d81a3';
+
+    chartVariance = new Chart(document.getElementById('varianceChart'), {
+      type:'line',
+      data:{ labels, datasets:[{
+        label:'RPM variance %', data: variances,
+        borderColor:'#8b5cf6', backgroundColor:'rgba(139,92,246,.12)',
+        pointBackgroundColor: colors, pointBorderColor: colors, pointRadius:5, pointHoverRadius:7,
+        tension:.35, fill:true, borderWidth:2.5
+      }]},
+      options:{
+        responsive:true,
+        plugins:{ legend:{display:false} },
+        scales:{
+          x:{ ticks:{color:tickColor, font:{family:'IBM Plex Mono', size:10}}, grid:{color:gridColor} },
+          y:{ ticks:{color:tickColor, font:{family:'IBM Plex Mono', size:10}}, grid:{color:gridColor} }
+        }
+      }
+    });
+
+    chartRpm = new Chart(document.getElementById('rpmChart'), {
+      type:'bar',
+      data:{ labels, datasets:[
+        {label:'Reported RPM', data:repRpms, backgroundColor:'rgba(34,211,238,.55)', borderRadius:5},
+        {label:'Required RPM', data:reqRpms, backgroundColor:'rgba(139,92,246,.55)', borderRadius:5},
+      ]},
+      options:{
+        responsive:true,
+        plugins:{ legend:{ labels:{ color:'#a3a6c2', font:{family:'Inter', size:11} } } },
+        scales:{
+          x:{ ticks:{color:tickColor, font:{family:'IBM Plex Mono', size:10}}, grid:{display:false} },
+          y:{ ticks:{color:tickColor, font:{family:'IBM Plex Mono', size:10}}, grid:{color:gridColor} }
+        }
+      }
+    });
+  }
+});
+</script>
+</body>
+</html>
